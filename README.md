@@ -1,2 +1,2 @@
 # LGTV_cortex_sn
-single nuclei RNA seq (10x) of cerebral cortex of LGTV infected C57BL/6 mice
+Droplet based (10x genomics) single nuclei RNA seq of cerebral cortex of LGTV infected C57BL/6 mice
