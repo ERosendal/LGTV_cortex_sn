@@ -1,0 +1,769 @@
+---
+title: "Differential gene expression analysis"
+author: "Ebba Rosendal"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    self_contained: true
+    highlight: tango
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    keep_md: yes
+    fig_caption: true
+  html_notebook:
+    self_contained: true
+    highlight: tango
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE, warning=FALSE, result='hold',fig.width=12,tidy=TRUE)
+knitr::opts_knit$set(progress=TRUE,verbose=TRUE)
+```
+<style>
+h1, .h1, h2, .h2, h3, .h3, h4, .h4 { margin-top: 50px }
+p.caption {font-size: 0.9em;font-style: italic;color: grey;margin-right: 10%;margin-left: 10%;text-align: justify}
+</style>
+
+***
+# Load data
+--> Loading libraries to be used 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results='hold'}
+suppressMessages(require(Matrix))
+suppressPackageStartupMessages({
+  library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(MAST)
+library(venn)
+})
+# checking/setting wd
+getwd()
+
+```
+
+--> Loading data 
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+getwd()
+alldata <- readRDS("../Anno/ClustAnnotation_220825_output/QC_220825_DataInt_220825_Anno_220825.rds")
+
+# Check DefaultAssay, should be "RNA"
+DefaultAssay(alldata)
+
+```
+
+***
+
+# DEG wt mock vs none
+
+```{r}
+
+alldata <- SetIdent(alldata, value = "treatment")
+
+setwd("./wt_mock_vs_none_220825")
+
+#Specifying which cell types to run DE analysis on
+celltypes <- c("Neuron_glu", "Neuron_gaba", "Micro", "Astro", "Oligo", "OPC", "VLMCs", "Peri", "Endo")
+
+deg.no <- c()
+
+for (i in celltypes) {
+  
+  print(i)
+  
+  alldata %>%
+  subset(., genotype == "wt") %>%
+  subset(., subset = celltype == i) %>%
+    FindMarkers(., ident.1 = "mock", ident.2 = "none", logfc.threshold = 1, 
+                test.use = "MAST") %>%
+    .[ which(.$p_val_adj < 0.05), ] %>%
+    arrange(-avg_log2FC) -> deg
+
+  temp.no <- c(i, nrow(deg[ which(deg$avg_log2FC > 0), ]), nrow(deg[ which(deg$avg_log2FC < 0), ]))
+  deg.no <- rbind(deg.no, temp.no)
+  
+  
+  #writing to csv, one file per cell type
+  write.csv2(deg, paste0(i,"_DEG_wt_mock_vs_none_avgl2FC_1.csv"), row.names = TRUE)
+  
+}
+
+write.csv(deg.no, file = "no_DEG_wt_mock_vs_none_avgl2FC_1.csv", row.names = FALSE)
+
+```
+
+***
+# DEG wt lgtv vs mocknone
+
+```{r}
+
+alldata <- SetIdent(alldata, value = "inf")
+
+#
+setwd("./wt_lgtv_vs_mocknone_220825")
+
+#Specifying which cell types to run DE analysis on
+celltypes <- c("Neuron_glu", "Neuron_gaba", "Micro", "Astro", "Oligo", "OPC", "VLMCs", "Peri", "Endo")
+
+deg.no <- c()
+
+for (i in celltypes) {
+  
+  print(i)
+  
+  alldata %>%
+  subset(., genotype == "wt") %>%
+  subset(., subset = celltype == i) %>%
+    FindMarkers(., ident.1 = "yes", ident.2 = "no", logfc.threshold = 1, 
+                test.use = "MAST") %>%
+    .[ which(.$p_val_adj < 0.05), ] %>%
+    arrange(-avg_log2FC) -> deg
+
+  temp.no <- c(i, nrow(deg[ which(deg$avg_log2FC > 0), ]), nrow(deg[ which(deg$avg_log2FC < 0), ]))
+  deg.no <- rbind(deg.no, temp.no)
+
+  #writing to csv, one file per cell type
+  write.csv2(deg, paste0(i,"_DEG_wt_lgtv_vs_mocknone_log2FC_1.csv"), row.names = TRUE)
+  
+}
+
+write.csv(deg.no, file = "no_DEG_wt_lgtv_vs_mocknone_log2FC_1.csv", row.names = FALSE)
+
+```
+
+### Overlap DEG wt, venn diagram
+
+```{r}
+micro.deg.up <- micro.deg[which(micro.deg$avg_log2FC > 0),]
+astro.deg.up <- astro.deg[which(astro.deg$avg_log2FC > 0),]
+oligo.deg.up <- oligo.deg[which(oligo.deg$avg_log2FC > 0),]
+endo.deg.up <- endo.deg[which(endo.deg$avg_log2FC > 0),]
+VLMCs.deg.up <- VLMCs.deg[which(VLMCs.deg$avg_log2FC > 0),]
+
+up <- list(micro = rownames(micro.deg.up), astro = rownames(astro.deg.up), oligo = rownames(oligo.deg.up), Endo =rownames(endo.deg.up), VLMCs =rownames(VLMCs.deg.up))
+
+up <- venn::venn(up, zcolor = "style")
+
+
+write.csv2(up, file = "up_wt_no_overlapping_genes_220825_VLMCs.csv", row.names = TRUE)
+
+
+```
+
+### UpSetR graph wt
+
+-> manually constructed from venn diagram
+
+```{r}
+up <- c(
+  Micro = 112,
+  Astro = 40,
+  Oligo = 32,
+  Endo = 34,
+  VLMCs = 5,
+  "Endo&VLMCs" = 2,
+  "Oligo&VLMCs" = 1,
+  "Astro&VLMCs" = 3,
+  "Astro&Endo" = 2,
+  "Astro&Endo&VLMCs" = 2,
+  "Astro&Oligo" = 3,
+  "Astro&Oligo&Endo" = 4,
+  "Micro&Endo" = 3,
+  "Micro&Oligo" = 7,
+  "Micro&Astro" = 11,
+  "Micro&Astro&Endo" = 1,
+  "Micro&Astro&Endo&VLMCs" = 1,
+  "Micro&Astro&Oligo" = 7,
+  "Micro&Astro&Oligo&Endo" = 2,
+  "Micro&Astro&Oligo&Endo&VLMCs" = 5
+  )
+
+
+library("UpSetR")
+
+pdf("UpSetR_wt_up_220825.pdf", onefile = TRUE, width=9, height=5.2)
+
+upset(fromExpression(up), 
+      nsets = 5, 
+      nintersects = 28, 
+      sets = c("VLMCs", "Oligo", "Endo", "Astro", "Micro"),
+      keep.order = TRUE, 
+      set.metadata = NULL, 
+      intersections = NULL, 
+      matrix.color = "black", 
+      main.bar.color = "black",
+      mainbar.y.label = "", 
+      mainbar.y.max = 300,  
+      sets.bar.color = "black", 
+      sets.x.label = "Total DEGs",
+      point.size = 5, 
+      line.size = 2, 
+      mb.ratio = c(0.5, 0.5),
+      expression = NULL, 
+      att.pos = NULL, 
+      order.by = "freq", 
+      decreasing = c(T, F),
+      show.numbers = "yes", 
+      number.angles = 0, 
+      group.by = "degree",
+      cutoff = NULL, 
+      queries = NULL, 
+      query.legend = "none",
+      shade.color = "gray88", shade.alpha = 0.25, matrix.dot.alpha = 0.5,
+      empty.intersections = "on", color.pal = 1, boxplot.summary = NULL,
+      attribute.plots = NULL, scale.intersections = "identity",
+      scale.sets = "identity", text.scale = c(1, 3.5, 3.5, 3.5, 3.5, 0), 
+      set_size.angles = 0,
+      set_size.show = F, set_size.numbers_size = NULL,
+      set_size.scale_max = 620
+      )
+dev.off()
+
+
+
+```
+        
+### Generating csv with rescaled (wt only) avg counts for common genes (O/M/A/E/V)      
+        
+```{r}
+wt <- subset(alldata, subset = genotype == "wt")
+
+all_wt_genes <- rownames(wt)
+wt.rescaled <- ScaleData(wt, features = all_wt_genes)
+
+common_all <- intersect(rownames(micro.deg), rownames(astro.deg))
+common_all <- intersect(common_all,rownames(oligo.deg))
+common_all <- intersect(common_all, rownames(endo.deg))
+common_all <- intersect(common_all, rownames(VLMCs.deg))
+common_all
+
+
+only.micro <- subset(wt.rescaled, subset = celltype == "Micro")
+micro.avg.scaled <- AverageExpression(only.micro, assays = "RNA", group.by = "inf", slot ="scale.data")
+micro.avg.scaled <- micro.avg.scaled[[1]]
+micro.avg.scaled.sub <- micro.avg.scaled[common_all, ] 
+
+only.astro <- subset(wt.rescaled, subset = celltype == "Astro")
+astro.avg.scaled <- AverageExpression(only.astro, assays = "RNA", group.by = "inf", slot ="scale.data")
+astro.avg.scaled <- astro.avg.scaled[[1]]
+astro.avg.scaled.sub <- astro.avg.scaled[common_all, ]
+
+only.oligo <- subset(wt.rescaled, subset = celltype == "Oligo")
+oligo.avg.scaled <- AverageExpression(only.oligo, assays = "RNA", group.by = "inf", slot ="scale.data")
+oligo.avg.scaled <- oligo.avg.scaled[[1]]
+oligo.avg.scaled.sub <- oligo.avg.scaled[common_all, ]
+
+only.endo <- subset(wt.rescaled, subset = celltype == "Endo")
+endo.avg.scaled <- AverageExpression(only.endo, assays = "RNA", group.by = "inf", slot ="scale.data")
+endo.avg.scaled <- endo.avg.scaled[[1]]
+endo.avg.scaled.sub <- endo.avg.scaled[common_all, ]
+
+only.VLMCs <- subset(wt.rescaled, subset = celltype == "VLMCs")
+VLMCs.avg.scaled <- AverageExpression(only.VLMCs, assays = "RNA", group.by = "inf", slot ="scale.data")
+VLMCs.avg.scaled <- VLMCs.avg.scaled[[1]]
+VLMCs.avg.scaled.sub <- VLMCs.avg.scaled[common_all, ]
+
+rm(only.micro, only.astro, only.VLMCs, only.endo, only.oligo)
+gc()
+
+setwd("./wt_lgtv_vs_mocknone_220825/Heatmaps")
+write.csv2(micro.avg.scaled.sub, file = "Common_all_Micro_wt_rescaled_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(astro.avg.scaled.sub, file = "Common_all_Astro_wt_rescaled_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(oligo.avg.scaled.sub, file = "Common_all_Oligo_wt_rescaled_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(endo.avg.scaled.sub, file = "Common_all_Endo_wt_rescaled_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(VLMCs.avg.scaled.sub, file = "Common_all_VLMCs_wt_rescaled_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+
+```
+
+### GSEA of wt
+
+```{r}
+library('msigdbr')
+library('fgsea')
+
+setwd("./wt_lgtv_vs_mocknone_220825/fgsea_reactome")
+
+#Setting inf as active ident
+alldata <- SetIdent(alldata, value = "inf")
+
+## Generating Pathways in correct format!
+C2_gene_sets = msigdbr(species = "mouse", category = "C2", subcategory = "CP:REACTOME")
+msigdbr_list = split(x = C2_gene_sets$gene_symbol, f = C2_gene_sets$gs_name)
+
+
+
+#Specifying which cell types to run DE analysis on
+celltypes <- c("Neuron_glu", "Neuron_gaba", "Micro", "Astro", "Oligo", "OPC", "VLMCs", "Peri", "Endo")
+
+deg.no <- c()
+
+for (i in celltypes) {
+  
+  print(i)
+
+  alldata %>%
+  subset(., genotype == "wt") %>%
+  subset(., subset = celltype == i) %>%
+    FindMarkers(., ident.1 = "yes", ident.2 = "no", logfc.threshold = 0, 
+                test.use = "MAST") -> deg
+  
+deg <- deg[ ! grepl("^mt-", rownames(deg)), ]
+deg <- deg[ ! grepl("^Rp[sl]", rownames(deg)), ]  
+  
+#Extracting gene symbls
+genes_name <- rownames(deg)
+
+#Adding gene symbols as a column in DEG.x
+deg <- cbind(genes_name, deg)
+
+#Keeping only log2FC and gene names
+deg <- deg[, c("genes_name", "avg_log2FC")]
+
+#Order the list based on log2FC values
+deg <- deg[order(-deg$avg_log2FC),]
+
+#Generating proper format for fgsea
+deg <- setNames(deg$avg_log2FC, deg$genes_name)
+
+#Double check class of input file (should be "numeric")
+class(deg)
+
+fgseaRes <- fgseaMultilevel(pathways = msigdbr_list, stats = deg, scoreType = "std")
+fgseaRes <- fgseaRes[ which(fgseaRes$padj < 0.05), ]
+
+#writing to csv, one file per cell type
+write.csv2(fgseaRes[,1:7], paste0(i,"_wt_REACTOME_pathways_220825.csv"), row.names = FALSE)
+
+  temp.no <- c(i, nrow(fgseaRes[ which(fgseaRes$NES > 0), ]), nrow(fgseaRes[ which(fgseaRes$NES < 0), ]))
+  deg.no <- rbind(deg.no, temp.no)
+  
+    
+} 
+
+write.csv(deg.no, file = "No_wt_REACTOME_pathways_220825.csv", row.names = FALSE)
+
+```
+
+***
+
+# Differetially expressed genes ifnar vs wt (no inf)
+
+```{r}
+
+alldata <- SetIdent(alldata, value = "genotype")
+
+setwd("./ifnar_vs_wt_no_inf_220825")
+
+#Specifying which cell types to run DE analysis on
+celltypes <- c("Neuron_glu", "Neuron_gaba", "Micro", "Astro", "Oligo", "OPC", "VLMCs", "Peri", "Endo")
+
+deg.no <- c()
+
+
+ 
+for (i in celltypes) {
+  
+  print(i)
+  
+  alldata %>%
+  subset(., inf == "no") %>%
+  .[ ! grepl("Tmem87b", rownames(.)), ] %>% #Tmem87b gave strange error message for microglia, removed
+  subset(., subset = celltype == i) %>%
+    FindMarkers(., ident.1 = "ifnar", ident.2 = "wt", logfc.threshold = 1, 
+                test.use = "MAST") %>%
+    .[ which(.$p_val_adj < 0.05), ] %>%
+    arrange(-avg_log2FC) -> deg
+
+  temp.no <- c(i, nrow(deg[ which(deg$avg_log2FC > 0), ]), nrow(deg[ which(deg$avg_log2FC < 0), ]))
+  deg.no <- rbind(deg.no, temp.no)
+  
+  
+  #writing to csv, one file per cell type
+  write.csv2(deg, paste0(i,"_DEG_wt_vs_ifnar_no_inf_avgl2FC_1.csv"), row.names = TRUE)
+  
+}
+
+write.csv(deg.no, file = "no_DEG_wt_vs_ifnar_no_inf_avgl2FC_1.csv", row.names = FALSE)
+
+```
+
+### Differetially expressed genes ifnar mock vs untreated
+
+```{r}
+
+alldata <- SetIdent(alldata, value = "treatment")
+
+setwd("./ifnar_mock_vs_none_220825")
+
+#Specifying which cell types to run DE analysis on
+celltypes <- c("Neuron_glu", "Neuron_gaba", "Micro", "Astro", "Oligo", "OPC", "VLMCs", "Peri", "Endo")
+
+deg.no <- c()
+
+for (i in celltypes) {
+  
+  print(i)
+  
+  alldata %>%
+  subset(., genotype == "ifnar") %>%
+  subset(., subset = celltype == i) %>%
+    FindMarkers(., ident.1 = "mock", ident.2 = "none", logfc.threshold = 1, 
+                test.use = "MAST") %>%
+    .[ which(.$p_val_adj < 0.05), ] %>%
+    arrange(-avg_log2FC) -> deg
+
+  temp.no <- c(i, nrow(deg[ which(deg$avg_log2FC > 0), ]), nrow(deg[ which(deg$avg_log2FC < 0), ]))
+  deg.no <- rbind(deg.no, temp.no)
+  
+  
+  #writing to csv, one file per cell type
+  write.csv2(deg, paste0(i,"_DEG_ifnar_mock__vs_none_avgl2FC_1.csv"), row.names = TRUE)
+  
+}
+
+write.csv(deg.no, file = "no_DEG_ifnar_mock__vs_none_avgl2FC_1.csv", row.names = FALSE)
+
+```
+
+
+### Differetially expressed genes ifnar lgtv vs mock+none
+
+```{r}
+
+alldata <- SetIdent(alldata, value = "inf")
+
+#
+setwd("./ifnar_lgtv_vs_mocknone_220825")
+
+#Specifying which cell types to run DE analysis on
+celltypes <- c("Neuron_glu", "Neuron_gaba", "Micro", "Astro", "Oligo", "OPC", "VLMCs", "Peri", "Endo")
+
+deg.no <- c()
+
+for (i in celltypes) {
+  
+  print(i)
+  
+  alldata %>%
+  subset(., genotype == "ifnar") %>%
+  subset(., subset = celltype == i) %>%
+    FindMarkers(., ident.1 = "yes", ident.2 = "no", logfc.threshold = 1, 
+                test.use = "MAST") %>%
+    .[ which(.$p_val_adj < 0.05), ] %>%
+    arrange(-avg_log2FC) -> deg
+
+  temp.no <- c(i, nrow(deg[ which(deg$avg_log2FC > 0), ]), nrow(deg[ which(deg$avg_log2FC < 0), ]))
+  deg.no <- rbind(deg.no, temp.no)
+
+  #writing to csv, one file per cell type
+  write.csv2(deg, paste0(i,"_DEG_ifnar_lgtv_vs_mocknone_avgl2FC_1.csv"), row.names = TRUE)
+  
+}
+
+write.csv(deg.no, file = "no_DEG_ifnar_lgtv_vs_mocknone_avgl2FC_1.csv", row.names = FALSE)
+
+```
+
+### Overlap DEG ifnar, separated on up and down
+
+```{r}
+micro.deg.up <- micro.deg[which(micro.deg$avg_log2FC > 0),]
+astro.deg.up <- astro.deg[which(astro.deg$avg_log2FC > 0),]
+oligo.deg.up <- oligo.deg[which(oligo.deg$avg_log2FC > 0),]
+endo.deg.up <- endo.deg[which(endo.deg$avg_log2FC > 0),]
+VLMCs.deg.up <- VLMCs.deg[which(VLMCs.deg$avg_log2FC > 0),]
+
+up <- list(micro = rownames(micro.deg.up), astro = rownames(astro.deg.up), oligo = rownames(oligo.deg.up), Endo =rownames(endo.deg.up), VLMCs = rownames(VLMCs.deg.up))
+
+up <- venn::venn(up, zcolor = "style")
+
+setwd("./ifnar_lgtv_vs_mocknone_220825")
+
+write.csv2(up, file = "up_ifnar_no_overlapping_genes_220825.csv")
+
+common_all <- intersect(rownames(micro.deg), rownames(astro.deg))
+common_all <- intersect(common_all,rownames(oligo.deg))
+common_all <- intersect(common_all, rownames(endo.deg))
+common_all <- intersect(common_all, rownames(VLMCs.deg))
+common_all
+
+write.csv2(common_all, "common_all_ifnar_220825.csv")
+
+```
+
+
+### UpSetR graph ifnar
+
+--> Corrected
+
+```{r, fig.height=7, fig.width=8}
+ifnar_up <- c(
+  Micro = 233,
+  Astro = 60,
+  Oligo = 46,
+  Endo = 39,
+  VLMCs = 52,
+  "Endo&VLMCs" = 10,
+  "Oligo&VLMCs" = 3,
+  "Endo&Oligo" = 2,
+  "Oligo&Endo&VLMCs" = 1,
+  "Astro&VLMCs" = 16,
+  "Astro&Endo" = 6,
+  "Astro&VLMCs&Endo" = 3,
+  "Astro&Oligo" = 8,
+  "Astro&VLMCs&Oligo" = 10,
+  "Astro&VLMCs&Endo&Oligo" = 10,
+  "Micro&VLMCs" = 35,
+  "Endo&Micro" = 27,
+  "Micro&Endo&VLMCs" = 25,
+  "Micro&Oligo" = 8,
+  "Oligo&VLMCs&Micro" = 5,
+  "Oligo&Endo&VLMCs&Micro" = 2,
+  "Micro&Astro" = 12,
+  "Micro&Astro&VLMCs" = 14,
+  "Micro&Endo&Astro" = 4,
+  "Micro&Endo&VLMCs&Astro" = 31,
+  "Astro&Micro&Oligo" = 5,
+  "Astro&VLMCs&Oligo&Micro" = 27,
+  "Astro&VLMCs&Endo&Oligo&Micro" = 95
+  )
+
+
+library("UpSetR")
+
+pdf("UpSetR_ifnar_up_VLMCs_with_numbers_220825.pdf", onefile = TRUE, width=9, height=5.2)
+
+upset(fromExpression(ifnar_up), 
+      nsets = 5, 
+      nintersects = 28, 
+      sets = c("Oligo", "Endo", "Astro", "VLMCs", "Micro"),
+      keep.order = TRUE, 
+      set.metadata = NULL, 
+      intersections = NULL, 
+      matrix.color = "gray50", 
+      main.bar.color = "gray50",
+      mainbar.y.label = "", 
+      mainbar.y.max = 300,  
+      sets.bar.color = "gray50", 
+      sets.x.label = "Total DEGs",
+      point.size = 5, 
+      line.size = 2, 
+      mb.ratio = c(0.5, 0.5),
+      expression = NULL, 
+      att.pos = NULL, 
+      order.by = "freq", 
+      decreasing = c(T, F),
+      show.numbers = "yes", 
+      number.angles = 0, 
+      group.by = "degree",
+      cutoff = NULL, 
+      queries = NULL, 
+      query.legend = "none",
+      shade.color = "gray88", shade.alpha = 0.25, matrix.dot.alpha = 0.5,
+      empty.intersections = "on", color.pal = 1, boxplot.summary = NULL,
+      attribute.plots = NULL, scale.intersections = "identity",
+      scale.sets = "identity", text.scale = c(1, 3.5, 3.5, 3.5, 3.5, 1), 
+      set_size.angles = 0,
+      set_size.show = F, set_size.numbers_size = NULL,
+      set_size.scale_max = 620
+      )
+dev.off()
+
+
+```
+
+### GSEA on ifnar
+
+```{r}
+
+
+setwd("./ifnar_lgtv_vs_mocknone_220825/fgsea_reactome")
+
+#Setting inf as active ident
+alldata <- SetIdent(alldata, value = "inf")
+
+## Generating Pathways in correct format!
+C2_gene_sets = msigdbr(species = "mouse", category = "C2", subcategory = "CP:REACTOME")
+#h_gene_sets = msigdbr(species = "mouse", category = "H")
+msigdbr_list = split(x = C2_gene_sets$gene_symbol, f = C2_gene_sets$gs_name)
+
+
+
+#Specifying which cell types to run DE analysis on
+celltypes <- c("Neuron_glu", "Neuron_gaba", "Micro", "Astro", "Oligo", "OPC", "VLMCs", "Peri", "Endo")
+
+deg.no <- c()
+
+for (i in celltypes) {
+  
+  print(i)
+
+  alldata %>%
+  subset(., genotype == "ifnar") %>%
+  subset(., subset = celltype == i) %>%
+    FindMarkers(., ident.1 = "yes", ident.2 = "no", logfc.threshold = 0, 
+                test.use = "MAST") -> deg
+  
+deg <- deg[ ! grepl("^mt-", rownames(deg)), ]
+deg <- deg[ ! grepl("^Rp[sl]", rownames(deg)), ]  
+  
+#Extracting gene symbls
+genes_name <- rownames(deg)
+
+#Adding gene symbols as a column in DEG.x
+deg <- cbind(genes_name, deg)
+
+#Keeping only log2FC and gene names
+deg <- deg[, c("genes_name", "avg_log2FC")]
+
+#Order the list based on log2FC values
+deg <- deg[order(-deg$avg_log2FC),]
+
+#Generating proper format for fgsea
+deg <- setNames(deg$avg_log2FC, deg$genes_name)
+
+#Double check class of input file (should be "numeric")
+class(deg)
+
+fgseaRes <- fgseaMultilevel(pathways = msigdbr_list, stats = deg, scoreType = "std")
+fgseaRes <- fgseaRes[ which(fgseaRes$padj < 0.05), ]
+
+#writing to csv, one file per cell type
+write.csv2(fgseaRes[,1:7], paste0(i,"_ifnar_REACTOME_pathways_220825.csv"), row.names = FALSE)
+
+  temp.no <- c(i, nrow(fgseaRes[ which(fgseaRes$NES > 0), ]), nrow(fgseaRes[ which(fgseaRes$NES < 0), ]))
+  deg.no <- rbind(deg.no, temp.no)
+  
+    
+} 
+
+write.csv(deg.no, file = "No_ifnar_REACTOME_pathways_220825.csv", row.names = FALSE)
+
+```
+
+***
+# IFN expression wt and Ifnar
+
+```{r, fig.height=4, fig.width=5}
+alldata <- SetIdent(alldata, value = "treatment")
+
+wt <- subset(alldata, subset = genotype == "wt")
+wt.lgtv <- subset(wt, subset = treatment == "lgtv")
+ifnar <- subset(alldata, subset = genotype == "ifnar")
+ifnar.lgtv <- subset(ifnar, subset = treatment == "lgtv")
+
+ifn <- c("Ifng", "Ifnb1", "Ifna2", "Ifna4", "Ifna5", "Ifna16")
+
+
+wt.ifn <- DotPlot(wt.lgtv, group.by = "celltype", features = ifn, cols = c("lightgrey", "Red4"), scale = F) +theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+ifnar.ifn <- DotPlot(ifnar.lgtv, group.by = "celltype", features = ifn, cols = c("lightgrey", "Red4"), scale = F) +theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+getwd()
+write.csv2(wt.ifn$data, file = "IFN_wt_220825.csv")
+write.csv2(ifnar.ifn$data, file = "IFN_ifnar_220825.csv")
+
+```
+
+### Generating csv with scaled avg counts for Cx- and H2-genes      
+        
+```{r}
+
+alldata <- SetIdent(alldata, value = "treatment")
+inf <- subset(alldata, subset = inf =="yes")
+
+Cx_H2 <- c("Ccl2", "Ccl5", "Cxcl10", "Cxcl9", "Cxcr3", "Ccr2", "Ccr5", "H2-K1", "H2-D1", "H2-Q4", "H2-Q7", "H2-T23", "H2-T24")
+
+only.micro <- subset(inf, subset = celltype == "Micro")
+micro.avg.scaled <- AverageExpression(only.micro, assays = "RNA", group.by = "genotype", slot ="scale.data")
+micro.avg.scaled <- micro.avg.scaled[[1]]
+micro.avg.scaled.sub <- micro.avg.scaled[Cx_H2, ] 
+
+only.astro <- subset(inf, subset = celltype == "Astro")
+astro.avg.scaled <- AverageExpression(only.astro, assays = "RNA", group.by = "genotype", slot ="scale.data")
+astro.avg.scaled <- astro.avg.scaled[[1]]
+astro.avg.scaled.sub <- astro.avg.scaled[Cx_H2, ]
+
+only.oligo <- subset(inf, subset = celltype == "Oligo")
+oligo.avg.scaled <- AverageExpression(only.oligo, assays = "RNA", group.by = "genotype", slot ="scale.data")
+oligo.avg.scaled <- oligo.avg.scaled[[1]]
+oligo.avg.scaled.sub <- oligo.avg.scaled[Cx_H2, ]
+
+only.endo <- subset(inf, subset = celltype == "Endo")
+endo.avg.scaled <- AverageExpression(only.endo, assays = "RNA", group.by = "genotype", slot ="scale.data")
+endo.avg.scaled <- endo.avg.scaled[[1]]
+endo.avg.scaled.sub <- endo.avg.scaled[Cx_H2, ]
+
+only.OPC <- subset(inf, subset = celltype == "OPC")
+OPC.avg.scaled <- AverageExpression(only.OPC, assays = "RNA", group.by = "genotype", slot ="scale.data")
+OPC.avg.scaled <- OPC.avg.scaled[[1]]
+OPC.avg.scaled.sub <- OPC.avg.scaled[Cx_H2, ]
+
+only.VLMCs <- subset(inf, subset = celltype == "VLMCs")
+VLMCs.avg.scaled <- AverageExpression(only.VLMCs, assays = "RNA", group.by = "genotype", slot ="scale.data")
+VLMCs.avg.scaled <- VLMCs.avg.scaled[[1]]
+VLMCs.avg.scaled.sub <- VLMCs.avg.scaled[Cx_H2, ]
+
+only.glu <- subset(inf, subset = celltype == "Neuron_glu")
+glu.avg.scaled <- AverageExpression(only.glu, assays = "RNA", group.by = "genotype", slot ="scale.data")
+glu.avg.scaled <- glu.avg.scaled[[1]]
+glu.avg.scaled.sub <- glu.avg.scaled[Cx_H2, ]
+
+only.gaba <- subset(inf, subset = celltype == "Neuron_gaba")
+gaba.avg.scaled <- AverageExpression(only.gaba, assays = "RNA", group.by = "genotype", slot ="scale.data")
+gaba.avg.scaled <- gaba.avg.scaled[[1]]
+gaba.avg.scaled.sub <- gaba.avg.scaled[Cx_H2, ]
+
+only.pericytes <- subset(inf, subset = celltype == "Peri")
+pericytes.avg.scaled <- AverageExpression(only.pericytes, assays = "RNA", group.by = "genotype", slot ="scale.data")
+pericytes.avg.scaled <- pericytes.avg.scaled[[1]]
+pericytes.avg.scaled.sub <- pericytes.avg.scaled[Cx_H2, ]
+
+only.Tcell <- subset(inf, subset = celltype == "T-cells")
+Tcell.avg.scaled <- AverageExpression(only.Tcell, assays = "RNA", group.by = "genotype", slot ="scale.data")
+Tcell.avg.scaled <- Tcell.avg.scaled[[1]]
+Tcell.avg.scaled.sub <- Tcell.avg.scaled[Cx_H2, ]
+
+rm(only.micro, only.astro, only.glu, only.gaba, only.oligo, only.cp, only.pericytes, only.OPC)
+gc()
+
+setwd("./scaled_counts_Cx_H2")
+write.csv2(micro.avg.scaled.sub, file = "Cx_H2_Micro_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(astro.avg.scaled.sub, file = "Cx_H2_Astro_inf__scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(oligo.avg.scaled.sub, file = "Cx_H2_Oligo_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(endo.avg.scaled.sub, file = "Cx_H2_Endo_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(OPC.avg.scaled.sub, file = "Cx_H2_OPC_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(VLMCs.avg.scaled.sub, file = "Cx_H2_VLMCs_inf__scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(glu.avg.scaled.sub, file = "Cx_H2_Neuron_glu_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(gaba.avg.scaled.sub, file = "Cx_H2_Neuron_gaba_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(pericytes.avg.scaled.sub, file = "Cx_H2_Pericytes_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+write.csv2(Tcell.avg.scaled.sub, file = "Cx_H2_Tcell_inf_scaled_avgcounts_lgtv_mocknone.csv", row.names = TRUE)
+
+```
+
+
+```{r}
+rm(celltypes, dat.temp, deg, genes, a, deg.venn, genotype, overlap, unique.wt, unique.ifnar, print, i, no)
+gc()
+```
+
+
+***
+# Session Info
+
+```{r}
+sessionInfo()
+```

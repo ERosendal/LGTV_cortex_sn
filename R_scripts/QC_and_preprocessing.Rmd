@@ -1,0 +1,491 @@
+---
+title: "QC"
+authors: "Ebba Rosendal"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    self_contained: true
+    highlight: tango
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    keep_md: yes
+    fig_caption: true
+  html_notebook:
+    self_contained: true
+    highlight: tango
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE, warning=FALSE, result='hold',fig.width=12,tidy=TRUE)
+knitr::opts_knit$set(progress=TRUE,verbose=TRUE)
+```
+<style>
+h1, .h1, h2, .h2, h3, .h3, h4, .h4 { margin-top: 50px }
+p.caption {font-size: 0.9em;font-style: italic;color: grey;margin-right: 10%;margin-left: 10%;text-align: justify}
+</style>
+
+***
+# Load data
+--> Loading libraries to be used for QC
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, results='hold'}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(ggplot2)
+  library(cowplot)
+})
+getwd()
+```
+
+--> Loading the data using `Seurat::Read10X_h5`, each dataset individually directly from HDF5 file format (.h5) = output files from cellranger
+
+```{r, echo=TRUE, message='hide',warning=FALSE,results='hold'}
+
+
+dat_1010 <- Seurat::Read10X_h5(
+  filename = "../no_introns/filtered_feature_bc_matrix_1010.h5",
+  use.names = T)
+dat_1011 <- Seurat::Read10X_h5(
+  filename = "../no_introns/filtered_feature_bc_matrix_1011.h5",
+  use.names = T)
+dat_1001 <- Seurat::Read10X_h5(
+  filename = "../no_introns/filtered_feature_bc_matrix_2_1001.h5",
+  use.names = T)
+dat_1003 <- Seurat::Read10X_h5(
+  filename = "../no_introns/filtered_feature_bc_matrix_2_1003.h5",
+  use.names = T)
+dat_1004 <- Seurat::Read10X_h5(
+  filename = "../no_introns/filtered_feature_bc_matrix_2_1004.h5",
+  use.names = T)
+dat_1005 <- Seurat::Read10X_h5(
+  filename = "../no_introns/filtered_feature_bc_matrix_2_1005.h5",
+  use.names = T)
+
+```
+
+***
+
+# Generating Seurat objects
+
+--> Generating Seurat object with `CreateSeuratObject`. Data not merged (yet). 
+
+Cutoffs applied when generating Seurat objects: `(min.cells = 3, min.features = 300)`, meaning we remove cells with less than **300** genes detected and genes detected in less than **3** cells
+
+Adding metadata `genotype = wt/ifnar`, `infection = yes/no` and `treatment = none/mock/lgtv`
+
+```{r, warning=FALSE}
+#Creating seurat objects from .h5 adding initial filtering thresholds
+sdata.1010 <- CreateSeuratObject(dat_1010, min.cells = 3, min.features = 300, project = "wt_none_10")
+sdata.1011 <- CreateSeuratObject(dat_1011, min.cells = 3, min.features = 300, project = "ifnar_none_11")
+sdata.1001 <- CreateSeuratObject(dat_1001, min.cells = 3, min.features = 300, project = "wt_mock_01")
+sdata.1003 <- CreateSeuratObject(dat_1003, min.cells = 3, min.features = 300, project = "wt_lgtv_03")
+sdata.1004 <- CreateSeuratObject(dat_1004, min.cells = 3, min.features = 300, project = "ifnar_mock_04")
+sdata.1005 <- CreateSeuratObject(dat_1005, min.cells = 3, min.features = 300, project = "ifnar_lgtv_05")
+
+# add genotype info
+sdata.1010$genotype = "wt"
+sdata.1011$genotype = "ifnar"
+sdata.1001$genotype = "wt"
+sdata.1003$genotype = "wt"
+sdata.1004$genotype = "ifnar"
+sdata.1005$genotype = "ifnar"
+
+# add treatment info
+sdata.1010$treatment = "none"
+sdata.1011$treatment = "none"
+sdata.1001$treatment = "mock"
+sdata.1003$treatment = "lgtv"
+sdata.1004$treatment = "mock"
+sdata.1005$treatment = "lgtv"
+
+# add infection info
+sdata.1010$inf = "no"
+sdata.1011$inf = "no"
+sdata.1001$inf = "no"
+sdata.1003$inf = "yes"
+sdata.1004$inf = "no"
+sdata.1005$inf = "yes"
+
+
+# Merge raw data 
+#OBS! only for ploting QC metrics later, QC done on each dataset separately
+alldata <- merge(sdata.1010, c(sdata.1011, sdata.1001, sdata.1003, sdata.1004, sdata.1005), add.cell.ids=c("wt_none_10", "ifnar_none_11", "wt_mock_01", "wt_lgtv_03", "ifnar_mock_04", "ifnar_lgtv_05"))
+
+```
+
+--> Deleting old files to clear up memory (code hidden).
+
+```{r warning=FALSE, include=FALSE}
+
+# Remove also sdat files
+rm(dat_1010, dat_1011, dat_1001, dat_1003, dat_1004, dat_1005)
+
+# run garbage collect to free up memory
+gc()
+```
+
+***
+# Calculate QC
+
+--> Calculating percentage mitochondrial reads as `percent_mito` and percentage ribosomal reads as `percent_ribo` and percentage Hb genes as `percent_hb` using `PercentageFeatureSet`
+
+```{r, results='hold', warning=FALSE}
+# Calculating percentage mito
+sdata.1010 <- PercentageFeatureSet(sdata.1010, "^mt-", col.name = "percent_mito")
+sdata.1011 <- PercentageFeatureSet(sdata.1011, "^mt-", col.name = "percent_mito")
+sdata.1001 <- PercentageFeatureSet(sdata.1001, "^mt-", col.name = "percent_mito")
+sdata.1003 <- PercentageFeatureSet(sdata.1003, "^mt-", col.name = "percent_mito")
+sdata.1004 <- PercentageFeatureSet(sdata.1004, "^mt-", col.name = "percent_mito")
+sdata.1005 <- PercentageFeatureSet(sdata.1005, "^mt-", col.name = "percent_mito")
+alldata <- PercentageFeatureSet(alldata, "^mt-", col.name = "percent_mito")
+
+# Calculating percentage ribo
+sdata.1010 <- PercentageFeatureSet(sdata.1010, "^Rp[sl]", col.name = "percent_ribo")
+sdata.1011 <- PercentageFeatureSet(sdata.1011, "^Rp[sl]", col.name = "percent_ribo")
+sdata.1001 <- PercentageFeatureSet(sdata.1001, "^Rp[sl]", col.name = "percent_ribo")
+sdata.1003 <- PercentageFeatureSet(sdata.1003, "^Rp[sl]", col.name = "percent_ribo")
+sdata.1004 <- PercentageFeatureSet(sdata.1004, "^Rp[sl]", col.name = "percent_ribo")
+sdata.1005 <- PercentageFeatureSet(sdata.1005, "^Rp[sl]", col.name = "percent_ribo")
+alldata <- PercentageFeatureSet(alldata, "^Rp[sl]", col.name = "percent_ribo")
+
+# Calculating percentage hb
+sdata.1010 <- PercentageFeatureSet(sdata.1010, "^Hb[^(p)]", col.name = "percent_hb")
+sdata.1011 <- PercentageFeatureSet(sdata.1011, "^Hb[^(p)]", col.name = "percent_hb")
+sdata.1001 <- PercentageFeatureSet(sdata.1001, "^Hb[^(p)]", col.name = "percent_hb")
+sdata.1003 <- PercentageFeatureSet(sdata.1003, "^Hb[^(p)]", col.name = "percent_hb")
+sdata.1004 <- PercentageFeatureSet(sdata.1004, "^Hb[^(p)]", col.name = "percent_hb")
+sdata.1005 <- PercentageFeatureSet(sdata.1005, "^Hb[^(p)]", col.name = "percent_hb")
+alldata <- PercentageFeatureSet(alldata, "^Hb[^(p)]", col.name = "percent_hb")
+
+
+```
+
+***
+# Filtering
+### **Upper limit of genes detected**
+
+--> Cells with more than **5000** genes removed using `WhichCells` + `subset` (code hidden)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='hold'}
+print("No of cells before filtering:")
+print(c("wt_none_10", ncol(sdata.1010),
+        "ifnar_none_11", ncol(sdata.1011),
+        "wt_mock_01", ncol(sdata.1001),
+        "wt_lgtv_03", ncol(sdata.1003),
+        "ifnar_mock_04", ncol(sdata.1004),
+        "ifnar_lgtv_05", ncol(sdata.1005)
+        ))
+
+# Creating a list of cells that have more than 4000 genes detected
+high.det.10 <- WhichCells(sdata.1010, expression = nFeature_RNA > 5000)
+high.det.11 <- WhichCells(sdata.1011, expression = nFeature_RNA > 5000)
+high.det.01 <- WhichCells(sdata.1001, expression = nFeature_RNA > 5000)
+high.det.03 <- WhichCells(sdata.1003, expression = nFeature_RNA > 5000)
+high.det.04 <- WhichCells(sdata.1004, expression = nFeature_RNA > 5000)
+high.det.05 <- WhichCells(sdata.1005, expression = nFeature_RNA > 5000)
+
+# SUbseting to remove these cells
+sdata.1010 <- subset(sdata.1010, cells=setdiff(WhichCells(sdata.1010), (high.det.10)))
+sdata.1011 <- subset(sdata.1011, cells=setdiff(WhichCells(sdata.1011), (high.det.11)))
+sdata.1001 <- subset(sdata.1001, cells=setdiff(WhichCells(sdata.1001), (high.det.01)))
+sdata.1003 <- subset(sdata.1003, cells=setdiff(WhichCells(sdata.1003), (high.det.03)))
+sdata.1004 <- subset(sdata.1004, cells=setdiff(WhichCells(sdata.1004), (high.det.04)))
+sdata.1005 <- subset(sdata.1005, cells=setdiff(WhichCells(sdata.1005), (high.det.05)))
+
+print("No of cells after filtering:")
+print(c("wt_none_10", ncol(sdata.1010),
+        "ifnar_none_11", ncol(sdata.1011),
+        "wt_mock_01", ncol(sdata.1001),
+        "wt_lgtv_03", ncol(sdata.1003),
+        "ifnar_mock_04", ncol(sdata.1004),
+        "ifnar_lgtv_05", ncol(sdata.1005)
+        ))
+```
+### **Filtering based on percentage mito**
+
+--> Cells with more than **10%** mitochondrial reads removed using `WhichCells` + `subset` 
+
+
+```{r,echo=TRUE,message='hide',warning='hide', results='hold',results='hold',fig.height=5,fig.width=16}
+
+# Generating a list of cells with less than 10% mito
+selected_mito_10 <- WhichCells(sdata.1010, expression = percent_mito < 10)
+selected_mito_11 <- WhichCells(sdata.1011, expression = percent_mito < 10)
+selected_mito_01 <- WhichCells(sdata.1001, expression = percent_mito < 10)
+selected_mito_03 <- WhichCells(sdata.1003, expression = percent_mito < 10)
+selected_mito_04 <- WhichCells(sdata.1004, expression = percent_mito < 10)
+selected_mito_05 <- WhichCells(sdata.1005, expression = percent_mito < 10)
+
+print("No of cells before filtering:")
+print(c("wt_none_10", ncol(sdata.1010),
+        "ifnar_none_11", ncol(sdata.1011),
+        "wt_mock_01", ncol(sdata.1001),
+        "wt_lgtv_03", ncol(sdata.1003),
+        "ifnar_mock_04", ncol(sdata.1004),
+        "ifnar_lgtv_05", ncol(sdata.1005)
+        ))
+
+# Subseting to keep only these cells
+sdata.1010 <- subset(sdata.1010, cells = selected_mito_10)
+sdata.1011 <- subset(sdata.1011, cells = selected_mito_11)
+sdata.1001 <- subset(sdata.1001, cells = selected_mito_01)
+sdata.1003 <- subset(sdata.1003, cells = selected_mito_03)
+sdata.1004 <- subset(sdata.1004, cells = selected_mito_04)
+sdata.1005 <- subset(sdata.1005, cells = selected_mito_05)
+
+print("No of cells after filtering:")
+print(c("wt_none_10", ncol(sdata.1010),
+        "ifnar_none_11", ncol(sdata.1011),
+        "wt_mock_01", ncol(sdata.1001),
+        "wt_lgtv_03", ncol(sdata.1003),
+        "ifnar_mock_04", ncol(sdata.1004),
+        "ifnar_lgtv_05", ncol(sdata.1005)
+        ))
+
+```
+
+--> Deleting old files to clear up memory (code hidden).
+
+```{r,echo=FALSE, include=FALSE}
+# remove all objects that will not be used.
+rm(high.det.10, high.det.11, high.det.01, high.det.03, high.det.04, high.det.05, selected_mito_10, selected_mito_11, selected_mito_01, selected_mito_03, selected_mito_04, selected_mito_05)
+
+# run garbage collect to free up memory
+gc()
+```
+ 
+### **Filtering out specific genes**
+
+Malat1 is **removed** before further analysis. Option to skip these filtering steps OR add more.
+
+```{r,echo=TRUE, message='hide',warning='hide', results='hold',results='hold',fig.height=4,fig.width=4}
+print("No of genes before filtering:")
+print(c("wt_none_10", nrow(sdata.1010),
+        "ifnar_none_11", nrow(sdata.1011),
+        "wt_mock_01", nrow(sdata.1001),
+        "wt_lgtv_03", nrow(sdata.1003),
+        "ifnar_mock_04", nrow(sdata.1004),
+        "ifnar_lgtv_05", nrow(sdata.1005)
+        ))
+
+# Filter out Malat1
+sdata.1010 <- sdata.1010[ ! grepl("Malat1", rownames(sdata.1010)), ]
+sdata.1011 <- sdata.1011[ ! grepl("Malat1", rownames(sdata.1011)), ]
+sdata.1001 <- sdata.1001[ ! grepl("Malat1", rownames(sdata.1001)), ]
+sdata.1003 <- sdata.1003[ ! grepl("Malat1", rownames(sdata.1003)), ]
+sdata.1004 <- sdata.1004[ ! grepl("Malat1", rownames(sdata.1004)), ]
+sdata.1005 <- sdata.1005[ ! grepl("Malat1", rownames(sdata.1005)), ]
+
+
+print("No of genes after removing and Malat1:")
+print(c("wt_none_10", nrow(sdata.1010),
+        "ifnar_none_11", nrow(sdata.1011),
+        "wt_mock_01", nrow(sdata.1001),
+        "wt_lgtv_03", nrow(sdata.1003),
+        "ifnar_mock_04", nrow(sdata.1004),
+        "ifnar_lgtv_05", nrow(sdata.1005)
+        ))
+
+```
+
+***
+# Separate based on sex
+
+```{r, fig.height=3, fig.width=8}
+
+# Creating a merged data set 
+alldata.filt <- merge(sdata.1010, c(sdata.1011, sdata.1001, sdata.1003, sdata.1004, sdata.1005), add.cell.ids=c("wt_none_10", "ifnar_none_11", "wt_mock_01", "wt_lgtv_03", "ifnar_mock_04", "ifnar_lgtv_05"))
+
+
+# Selects cells based on expression of Xist (female vs male) and combination of Xist and Eif2s3y (possible doublets)
+# (obs!! female here will contain the possible doublets)
+selected_male <- WhichCells(alldata.filt, expression = Xist == 0)
+selected_pd <- WhichCells(alldata.filt, expression = Xist > 0 & Eif2s3y > 0)
+
+# Adding metadata sex, all "female"
+alldata.filt$sex = "female"
+
+# Changing metadata "sex" to male for cells with Xist == 0
+alldata.filt$sex[selected_male] <- "male" 
+alldata.filt$sex[selected_pd] <- "doublet"
+
+
+# Generating a table with no. of cells in each condition
+No.of.cells <- as.table(c(ncol(alldata.filt), 
+                    ncol(alldata.filt[,alldata.filt$sex == "female"]), 
+                    ncol(alldata.filt[,alldata.filt$sex == "male"]), 
+                    ncol(alldata.filt[,alldata.filt$sex == "doublet"])))
+
+No.of.cells
+
+
+#Defining qc features to plot
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo", "percent_hb")
+
+#ViolinPlot of Xist, Eif2s3y and qc features, data separated on sex
+plot_grid(ncol = 4, 
+          VlnPlot(alldata.filt, group.by= "sex", features = "Xist", pt.size = 0)
+          +theme(legend.position='none') +ggtitle("Xist"),
+          VlnPlot(alldata.filt, group.by= "sex", features = "Eif2s3y", pt.size = 0)
+          +theme(legend.position='none') +ggtitle("Eif2s3y"),
+          VlnPlot(alldata.filt, group.by= "sex", features = feats[1], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("No. of genes"),
+          VlnPlot(alldata.filt, group.by= "sex", features = feats[3], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("Mt content")
+)
+          
+Sex <- c("All", "Female", "Male", "Possible doublets")
+table <- rbind(No.of.cells, Sex)
+table
+
+```
+
+--> Deleting old files to clear up memory (code hidden).
+ 
+```{r, echo=FALSE, include=FALSE}
+# remove all objects that will not be used.
+rm(selected_male, selected, male, No.of.cells, table, Sex, selected_pd)
+
+# run garbage collect to free up memory
+gc()
+```
+
+
+***
+
+# Removing predicted doublets based on co-expression of Xist and Eif2s3y
+
+```{r, echo=FALSE}
+
+# Subsetting cells predicted as doublets
+prob.doublet <- subset(alldata.filt, subset = sex == "doublet")
+
+# Check no. of cells before filtering
+dim(alldata.filt)
+
+# Remove prob.doublets
+alldata.filt <- subset(alldata.filt, cells=setdiff(WhichCells(alldata.filt), (WhichCells(prob.doublet))))
+
+# Check no. of cells after filtering
+dim(alldata.filt)
+
+```
+
+***
+# Plot QC
+
+### **QC metrics before filtering**
+
+QC-features as violin plots **before any filtering**, metrics plotted both with dots (one dot=one nuclei) and without to better visualize relative distribution
+
+```{r,echo=FALSE, message='hide',warning='hide', results='hold',fig.height=10,fig.width=8}
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo", "percent_hb")
+
+plot_grid(ncol = 2, 
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[1], pt.size = 0.1)
+          +theme(legend.position='none') +ggtitle("No. of genes"),
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[1], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("No. of genes no dots"),
+          
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[2], pt.size = 0.1)
+          +theme(legend.position='none') +ggtitle("UMIs"),
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[2], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("UMIs not dots"),
+          
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[3], pt.size = 0.1)
+          +theme(legend.position='none') +ggtitle("% mitochonrdrial reads"),
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[3], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("% mitochonrdrial reads no dots"),
+          
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[4], pt.size = 0.1)
+          +theme(legend.position='none') +ggtitle("% ribosomal reads"),
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[4], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("% ribosomal reads no dots"),
+          
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[5], pt.size = 0.1)
+          +theme(legend.position='none') +ggtitle("% Hb reads"),
+          VlnPlot(alldata, group.by= "orig.ident", features = feats[5], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("% Hb reads no dots")
+          )
+```
+
+### **QC metrics after filtering**
+
+QC-features as violin plots **after filtering**, metrics plotted both with dots (one dot=one nuclei) and without to better visualize relative distribution. 
+
+```{r,echo=FALSE, message='hide',warning='hide', results='hold',fig.height=18,fig.width=8}
+
+plot_grid(ncol = 2, 
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[1], pt.size = 0.01)
+          +theme(legend.position='none') +ggtitle("No. of genes"),
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[1], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("No. of genes no dots"),
+          
+          
+          
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[2], pt.size = 0.01)
+          +theme(legend.position='none') +ggtitle("UMIs"),
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[2], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("UMIs not dots"),
+          
+          
+          
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[3], pt.size = 0.01)
+          +theme(legend.position='none') +ggtitle("% mitochonrdrial reads"),
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[3], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("% mitochonrdrial reads no dots"),
+          
+          
+          
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[4], pt.size = 0.01)
+          +theme(legend.position='none') +ggtitle("% ribosomal reads"),
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[4], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("% ribosomal reads no dots"),
+          
+          
+          
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[5], pt.size = 0.01)
+          +theme(legend.position='none') +ggtitle("% Hb reads"),
+          VlnPlot(alldata.filt, group.by= "orig.ident", features = feats[5], pt.size = 0)
+          +theme(legend.position='none') +ggtitle("% Hb reads no dots")
+)
+          
+
+```
+
+
+```{r, echo=TRUE}
+
+rm(sdata.1001, sdata.1003, sdata.1004, sdata.1005, sdata.1010, sdata.1011, table_merged, alldata, prob.doublet)
+gc()
+
+```
+
+***
+# Saving data
+
+```{r save, echo=TRUE, message='hide',warning='hide'}
+
+dir.create('./QC_220825_output', showWarnings = F)
+saveRDS(alldata.filt,"./QC_220825_output/QC_220825.rds")
+
+```
+
+***
+# Session Info
+
+```{r}
+sessionInfo()
+```
